@@ -250,7 +250,7 @@ def main():
                     'a_iii_10_befektetett_penzugyi_eszkozok_ertekelesi_kulonbozete': r.get('MERLEG_029.'),
 
                     # === Új tétel 1 ===
-                    'a_iv_halasztott_adokoveteles': r.get('MERLEG_030.') if p['et_ev'] >= 2024 else None,
+                    'a_iv_halasztott_adokoveteles': r.get('MERLEG_030.', 0) if p['et_ev'] >= 2024 else 0,
 
                     # === MÉRLEG: Első eltolás (Eredeti 030-093 -> + off1) ===
                     'b_forgoeszkozok': r.get(f'MERLEG_{30 + off1:03d}.'),
@@ -318,7 +318,7 @@ def main():
                     'f_ii_9_egyeb_hosszu_lejaratu_kotelezettsegek': r.get(f'MERLEG_{93 + off1:03d}.'),
 
                     # === Új tétel 2 ===
-                    'f_ii_10_halasztott_adokotelezettseg': r.get('MERLEG_095.') if p['et_ev'] >= 2024 else None,
+                    'f_ii_10_halasztott_adokotelezettseg': r.get('MERLEG_095.', 0) if p['et_ev'] >= 2024 else None,
 
                     # === MÉRLEG: Második eltolás (Eredeti 094-111 -> + off2) ===
                     'f_iii_rovid_lejaratu_kotelezettsegek': r.get(f'MERLEG_{94 + off2:03d}.'),
@@ -389,7 +389,7 @@ def main():
                     'ek_x_adofizetesi_kotelezettseg': r.get('EREDMENYKIMUTATAS_046.'),
 
                     # === EREDMÉNYKIMUTATÁS: Új tétel (047) és Eltolás (047 -> 048) ===
-                    'ek_x_1_halasztott_adokulonbozet': r.get('EREDMENYKIMUTATAS_047.') if p['et_ev'] >= 2024 else None,
+                    'ek_x_1_halasztott_adokulonbozet': r.get('EREDMENYKIMUTATAS_047.', 0) if p['et_ev'] >= 2024 else None,
                     'ek_d_adozott_eredmeny': r.get(f'EREDMENYKIMUTATAS_{47 + off3:03d}.')
                 }
 
