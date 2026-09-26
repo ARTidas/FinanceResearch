@@ -23,7 +23,11 @@ CREATE TABLE `02773_research`.beszamolok (
     CONSTRAINT unique_ceg_ev UNIQUE (ceg_id, et_ev)
 );
 
-
+-- 1. Ürítsük ki a táblát a duplikációk eltávolításához
+TRUNCATE TABLE `02773_research`.beszamolo_adatok;
+-- 2. Tegyünk egy egyedi (UNIQUE) megszorítást a beszamolo_id oszlopra
+ALTER TABLE `02773_research`.beszamolo_adatok
+ADD CONSTRAINT unique_beszamolo_id UNIQUE (beszamolo_id);
 CREATE TABLE `02773_research`.beszamolo_adatok (
     id SERIAL PRIMARY KEY,
     beszamolo_id INT REFERENCES `02773_research`.beszamolok(id) ON DELETE CASCADE,
