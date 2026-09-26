@@ -8,15 +8,16 @@ REPORTS_DIR = r"C:\Users\Admin\Desktop\projects\FinanceResearch\GrandTokajReport
 
 def clean_number(text):
     if not text:
-        return None
-    # Eltávolítjuk a nem-törhető szóközöket, szóközöket
+        return 0.0  # None helyett 0.0-t adunk vissza, ha teljesen üres a cella
+    
     cleaned = text.replace('\xa0', '').replace(' ', '').strip()
     if cleaned == '' or cleaned == '-':
         return 0.0
+        
     try:
         return float(cleaned)
     except ValueError:
-        return None
+        return 0.0  # Hiba esetén is 0.0 legyen None helyett
 
 def parse_address(szekhely_text):
     """Kinyeri a várost és az irányítószámot a székhely szövegből (pl. 'Magyarország, 3934 Tolcsva Petőfi S. u. 36-40')"""
@@ -318,7 +319,7 @@ def main():
                     'f_ii_9_egyeb_hosszu_lejaratu_kotelezettsegek': r.get(f'MERLEG_{93 + off1:03d}.'),
 
                     # === Új tétel 2 ===
-                    'f_ii_10_halasztott_adokotelezettseg': r.get('MERLEG_095.', 0) if p['et_ev'] >= 2024 else None,
+                    'f_ii_10_halasztott_adokotelezettseg': r.get('MERLEG_095.', 0) if p['et_ev'] >= 2024 else 0,
 
                     # === MÉRLEG: Második eltolás (Eredeti 094-111 -> + off2) ===
                     'f_iii_rovid_lejaratu_kotelezettsegek': r.get(f'MERLEG_{94 + off2:03d}.'),
@@ -389,7 +390,7 @@ def main():
                     'ek_x_adofizetesi_kotelezettseg': r.get('EREDMENYKIMUTATAS_046.'),
 
                     # === EREDMÉNYKIMUTATÁS: Új tétel (047) és Eltolás (047 -> 048) ===
-                    'ek_x_1_halasztott_adokulonbozet': r.get('EREDMENYKIMUTATAS_047.', 0) if p['et_ev'] >= 2024 else None,
+                    'ek_x_1_halasztott_adokulonbozet': r.get('EREDMENYKIMUTATAS_047.', 0) if p['et_ev'] >= 2024 else 0,
                     'ek_d_adozott_eredmeny': r.get(f'EREDMENYKIMUTATAS_{47 + off3:03d}.')
                 }
 
