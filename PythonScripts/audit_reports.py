@@ -1,11 +1,20 @@
 import pymysql
 import pandas as pd
+import re
 from config import DB_CONFIG
 
+def make_safe_filename(name):
+    """Cégnevekből fájlnév-kompatibilis stringet készít (pl. 'Grand Tokaj Zrt.' -> 'Grand_Tokaj_Zrt')"""
+    # Ékezetek maradhatnak, de minden speciális karaktert és szóközt alulvonásra cserélünk
+    safe_name = re.sub(r'[^\w\s-]', '', name)
+    safe_name = re.sub(r'[\s]+', '_', safe_name)
+    return safe_name.strip('_')
+
 def main():
-    # Az ellenőrző SQL lekérdezés
+    # Az ellenőrző SQL lekérdezés, kiegészítve a cég nevével
     sql_query = """
     SELECT
+        CEGEK.nev AS cegnev,
         BESZAMOLOK.et_ev,
         
         -- ESZKÖZÖK KÜLÖNBSÉGEI
@@ -122,6 +131,7 @@ def main():
     FROM
         02773_research.beszamolo_adatok ADATOK 
         INNER JOIN 02773_research.beszamolok BESZAMOLOK ON ADATOK.beszamolo_id = BESZAMOLOK.id
+        INNER JOIN 02773_research.cegek CEGEK ON BESZAMOLOK.ceg_id = CEGEK.id
     ORDER BY BESZAMOLOK.et_ev ASC;
     """
 
@@ -140,37 +150,90 @@ def main():
         print("📊 Adatok lekérdezése és ellenőrzése...")
         df = pd.read_sql(sql_query, connection)
 
-        # 1. Konzolos riport készítése
-        # Kigyűjtjük a '_DIFF' végződésű ellenőrző oszlopokat
+        if df.empty:
+            print("Nincs feldolgozható adat az adatbázisban.")
+            return
+
+        # 1. Belső ellenőrzések a DIFF oszlopokon
         diff_columns = [col for col in df.columns if col.endswith('_DIFF')]
-        
-        hiba_talalva = False
         
         print("\n=== AUDIT EREDMÉNYEK ===")
         for index, row in df.iterrows():
-            ev = row['et_ev']
+            ev = int(row['et_ev']) if pd.notna(row['et_ev']) else "Ismeretlen"
             hibak = []
             
             for col in diff_columns:
-                # Lebegőpontos pontatlanságok elkerülése végett 0.01-es tűréshatárt alkalmazunk
                 if pd.notna(row[col]) and abs(row[col]) > 0.01:
                     hibak.append(f"{col}: Eltérés = {row[col]:.2f}")
             
             if hibak:
-                hiba_talalva = True
                 print(f"❌ {ev}. év: Belső egyezőségi hibák találhatók!")
                 for hiba in hibak:
                     print(f"   - {hiba}")
             else:
                 print(f"✅ {ev}. év: Minden vizsgált főösszeg tökéletesen egyezik a részletekkel.")
+
+        # ====================================================
+        # 2. MUTATÓK (KPI-ok) KISZÁMÍTÁSA PANDAS SEGÍTSÉGÉVEL
+        # ====================================================
+        print("\n📈 Pénzügyi mutatók (KPI) kiszámítása...")
         
-        # 2. Exportálás Excel fájlba
-        excel_filename = "Beszamolo_Audit_Kivonat.xlsx"
-        df.to_excel(excel_filename, index=False)
-        print(f"\n💾 Az ellenőrzött adathalmaz részletei sikeresen kimentve ide: {excel_filename}")
+        # A százalékos értékeket 100-zal szorozva tesszük be, hogy könnyen olvasható legyen az Excelben
+        df['MUTATO: Vagyon változása (%)'] = ((df['eszkozok_osszesen'] / df['eszkozok_osszesen'].shift(1)) - 1) * 100
+        
+        # CAGR Számítás (A legelső évtől számítva minden egyes sorra, ahol releváns)
+        elso_ev_vagyona = df['eszkozok_osszesen'].iloc[0]
+        elso_ev = df['et_ev'].iloc[0]
+        eltelt_evek = df['et_ev'] - elso_ev
+        
+        # Csak ott számolunk CAGR-t, ahol az eltelt évek > 0
+        df['MUTATO: Vagyon CAGR a bázisévtől (%)'] = df.apply(
+            lambda row: (((row['eszkozok_osszesen'] / elso_ev_vagyona) ** (1 / (row['et_ev'] - elso_ev))) - 1) * 100 
+            if (row['et_ev'] - elso_ev) > 0 else 0, axis=1
+        )
+        
+        df['MUTATO: Saját tőke aránya (%)'] = (df['d_sajat_toke'] / df['forrasok_osszesen']) * 100
+        df['MUTATO: Eladósodottság / Idegen tőke aránya (%)'] = ((df['f_kotelezettsegek'] + df['g_passziv_idobeli_elhatarolasok']) / df['forrasok_osszesen']) * 100
+        
+        # Ellenőrzés: A Céltartalékok ('e_celtartalekok') hiánya miatt ez ritkán lesz pontosan 100%, de jó audit sor.
+        df['MUTATO: Tőke + Idegen tőke ELLENŐRZÉS (%)'] = df['MUTATO: Saját tőke aránya (%)'] + df['MUTATO: Eladósodottság / Idegen tőke aránya (%)']
+        
+        df['MUTATO: Tőkefeszültség (%)'] = ((df['f_kotelezettsegek'] + df['g_passziv_idobeli_elhatarolasok']) / df['d_sajat_toke']) * 100
+        
+        df['MUTATO: Saját tőke szorzó (jegyzett tőkéhez) (%)'] = (df['d_sajat_toke'] / df['d_i_jegyzett_toke']) * 100
+        df['MUTATO: Saját tőke változása (%)'] = df['MUTATO: Saját tőke szorzó (jegyzett tőkéhez) (%)'] - df['MUTATO: Saját tőke szorzó (jegyzett tőkéhez) (%)'].shift(1)
+        
+        df['MUTATO: Fedezet I. mutató (%)'] = (df['d_sajat_toke'] / df['a_befektetett_eszkozok']) * 100
+        df['MUTATO: Fedezet II. mutató (%)'] = ((df['d_sajat_toke'] + df['f_ii_hosszu_lejaratu_kotelezettsegek']) / df['a_befektetett_eszkozok']) * 100
+
+        # ====================================================
+        # 3. EXPORTÁLÁS EXCEL FÁJLBA TRANSZPONÁLT FORMÁTUMBAN
+        # ====================================================
+        
+        # Fájlnév dinamikus előállítása
+        cegnev = df['cegnev'].iloc[0]
+        safe_cegnev = make_safe_filename(cegnev)
+        excel_filename = f"{safe_cegnev}_Beszamolo_Elemzes.xlsx"
+        
+        # Töröljük a felesleges cégnevet, mert az Excel névben már benne van
+        df = df.drop(columns=['cegnev'])
+        
+        # Évszámok tisztítása (.0 levágása)
+        df['et_ev'] = df['et_ev'].fillna(0).astype(int)
+        
+        # Transzponálás
+        df_transposed = df.set_index('et_ev').T
+        df_transposed.index.name = 'Attribútum / Mutató'
+        df_transposed.columns.name = 'Év'
+        
+        # Kimentés
+        df_transposed.to_excel(excel_filename, index=True)
+        print(f"\n💾 Az adatok és a mutatók transzponálva kimentve ide: {excel_filename}")
 
     except Exception as e:
-        print("Hiba történt a lekérdezés vagy feldolgozás során:", e)
+        import traceback
+        print("Hiba történt a lekérdezés vagy feldolgozás során:")
+        traceback.print_exc()
     finally:
         connection.close()
         print("Kapcsolat lezárva.")
