@@ -179,7 +179,7 @@ def main():
         print("\n📈 Pénzügyi mutatók (KPI) kiszámítása...")
         
         # A százalékos értékeket 100-zal szorozva tesszük be, hogy könnyen olvasható legyen az Excelben
-        df['MUTATO: Vagyon változása (%)'] = ((df['eszkozok_osszesen'] / df['eszkozok_osszesen'].shift(1)) - 1) * 100
+        df['MUTATO: Vagyon változása (%)'] = ((df['eszkozok_osszesen'] / df['eszkozok_osszesen'].shift(1)) - 1)
         
         # CAGR Számítás (A legelső évtől számítva minden egyes sorra, ahol releváns)
         elso_ev_vagyona = df['eszkozok_osszesen'].iloc[0]
@@ -188,23 +188,23 @@ def main():
         
         # Csak ott számolunk CAGR-t, ahol az eltelt évek > 0
         df['MUTATO: Vagyon CAGR a bázisévtől (%)'] = df.apply(
-            lambda row: (((row['eszkozok_osszesen'] / elso_ev_vagyona) ** (1 / (row['et_ev'] - elso_ev))) - 1) * 100 
+            lambda row: (((row['eszkozok_osszesen'] / elso_ev_vagyona) ** (1 / (row['et_ev'] - elso_ev))) - 1) 
             if (row['et_ev'] - elso_ev) > 0 else 0, axis=1
         )
         
-        df['MUTATO: Saját tőke aránya (%)'] = (df['d_sajat_toke'] / df['forrasok_osszesen']) * 100
-        df['MUTATO: Eladósodottság / Idegen tőke aránya (%)'] = ((df['f_kotelezettsegek'] + df['g_passziv_idobeli_elhatarolasok']) / df['forrasok_osszesen']) * 100
+        df['MUTATO: Saját tőke aránya (%)'] = (df['d_sajat_toke'] / df['forrasok_osszesen'])
+        df['MUTATO: Eladósodottság / Idegen tőke aránya (%)'] = ((df['f_kotelezettsegek'] + df['g_passziv_idobeli_elhatarolasok']) / df['forrasok_osszesen'])
         
         # Ellenőrzés: A Céltartalékok ('e_celtartalekok') hiánya miatt ez ritkán lesz pontosan 100%, de jó audit sor.
         df['MUTATO: Tőke + Idegen tőke ELLENŐRZÉS (%)'] = df['MUTATO: Saját tőke aránya (%)'] + df['MUTATO: Eladósodottság / Idegen tőke aránya (%)']
         
-        df['MUTATO: Tőkefeszültség (%)'] = ((df['f_kotelezettsegek'] + df['g_passziv_idobeli_elhatarolasok']) / df['d_sajat_toke']) * 100
+        df['MUTATO: Tőkefeszültség (%)'] = ((df['f_kotelezettsegek'] + df['g_passziv_idobeli_elhatarolasok']) / df['d_sajat_toke'])
         
-        df['MUTATO: Saját tőke szorzó (jegyzett tőkéhez) (%)'] = (df['d_sajat_toke'] / df['d_i_jegyzett_toke']) * 100
+        df['MUTATO: Saját tőke szorzó (jegyzett tőkéhez) (%)'] = (df['d_sajat_toke'] / df['d_i_jegyzett_toke'])
         df['MUTATO: Saját tőke változása (%)'] = df['MUTATO: Saját tőke szorzó (jegyzett tőkéhez) (%)'] - df['MUTATO: Saját tőke szorzó (jegyzett tőkéhez) (%)'].shift(1)
         
-        df['MUTATO: Fedezet I. mutató (%)'] = (df['d_sajat_toke'] / df['a_befektetett_eszkozok']) * 100
-        df['MUTATO: Fedezet II. mutató (%)'] = ((df['d_sajat_toke'] + df['f_ii_hosszu_lejaratu_kotelezettsegek']) / df['a_befektetett_eszkozok']) * 100
+        df['MUTATO: Fedezet I. mutató (%)'] = (df['d_sajat_toke'] / df['a_befektetett_eszkozok'])
+        df['MUTATO: Fedezet II. mutató (%)'] = ((df['d_sajat_toke'] + df['f_ii_hosszu_lejaratu_kotelezettsegek']) / df['a_befektetett_eszkozok'])
 
         # ====================================================
         # 3. EXPORTÁLÁS EXCEL FÁJLBA TRANSZPONÁLT FORMÁTUMBAN
