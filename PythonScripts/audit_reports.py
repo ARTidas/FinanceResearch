@@ -1,22 +1,20 @@
 import pymysql
 import pandas as pd
+import numpy as np
 import re
 from config import DB_CONFIG
 
 def make_safe_filename(name):
-    """Cégnevekből fájlnév-kompatibilis stringet készít"""
     safe_name = re.sub(r'[^\w\s-]', '', name)
     safe_name = re.sub(r'[\s]+', '_', safe_name)
     return safe_name.strip('_')
 
 def main():
-    # Az ellenőrző SQL lekérdezés, kiegészítve a cég nevével
     sql_query = """
     SELECT
         CEGEK.nev AS cegnev,
         BESZAMOLOK.et_ev,
         
-        -- ESZKÖZÖK KÜLÖNBSÉGEI
         (ADATOK.eszkozok_osszesen - ADATOK.forrasok_osszesen) AS eszkozok_forrasok_DIFF,
         (ADATOK.eszkozok_osszesen - (
             ADATOK.a_befektetett_eszkozok + ADATOK.b_forgoeszkozok + ADATOK.c_aktiv_idobeli_elhatarolasok
@@ -70,7 +68,6 @@ def main():
             ADATOK.c_1_bevetelek_aktiv_idobeli_elhatarolasa + ADATOK.c_2_koltsgek_forditasok_aktiv_idobeli_elhatarolasa + ADATOK.c_3_halasztott_raforditasok
         )) AS aktiv_idobeli_elhatarolasok_DIFF,
 
-        -- FORRÁSOK KÜLÖNBSÉGEI
         (ADATOK.forrasok_osszesen - (
             ADATOK.d_sajat_toke + ADATOK.e_celtartalekok + ADATOK.f_kotelezettsegek + ADATOK.g_passziv_idobeli_elhatarolasok
         )) AS forrasok_DIFF,
@@ -108,7 +105,6 @@ def main():
             ADATOK.g_1_bevetelek_passziv_idobeli_elhatarolasa + ADATOK.g_2_koltsgek_raforditasok_passziv_idobeli_elhatarolasa + ADATOK.g_3_halasztott_bevetelek
         )) AS passziv_idobeli_elhatarolasok_DIFF,
 
-        -- EREDMÉNYKIMUTATÁS KÜLÖNBSÉGEI
         (ADATOK.ek_i_ertekesites_netto_arbevetele - (
             ADATOK.ek_01_belfoldi_ertekesites_netto_arbevetele + ADATOK.ek_02_exportertekesites_netto_arbevetele
         )) AS ek_ertekesites_netto_arbevetele_DIFF,
@@ -124,7 +120,6 @@ def main():
             ADATOK.ek_10_berkoltseg + ADATOK.ek_11_szemelyi_jellegu_egyeb_kifizetesek + ADATOK.ek_12_berjarulekok
         )) AS ek_szemelyi_jellegu_raforditasok_DIFF,
         
-        -- ÖSSZES ADAT BEILLESZTÉSE A TELJES EXPORTÉRT
         ADATOK.*
         
     FROM
@@ -136,18 +131,13 @@ def main():
 
     print("🔌 Kapcsolódás az adatbázishoz...")
     connection = pymysql.connect(
-        host=DB_CONFIG['host'],
-        port=DB_CONFIG['port'],
-        user=DB_CONFIG['user'],
-        password=DB_CONFIG['password'],
-        database=DB_CONFIG['database'],
-        charset='utf8mb4'
+        host=DB_CONFIG['host'], port=DB_CONFIG['port'],
+        user=DB_CONFIG['user'], password=DB_CONFIG['password'],
+        database=DB_CONFIG['database'], charset='utf8mb4'
     )
 
     try:
-        print("📊 Adatok lekérdezése és betöltése...")
         df_all = pd.read_sql(sql_query, connection)
-
         if df_all.empty:
             print("Nincs feldolgozható adat az adatbázisban.")
             return
@@ -155,48 +145,31 @@ def main():
         cegek = df_all['cegnev'].unique()
         print(f"\n🏢 Talált cégek száma: {len(cegek)}")
 
-        # Végigmegyünk minden egyes cégen külön-külön
         for cegnev in cegek:
             print(f"\n========================================")
             print(f"📄 Feldolgozás és audit: {cegnev}")
             
-            # Adatkeret szűrése az adott cégre, és kronológiai sorrendbe állítása (shift miatt kritikus)
-            df_ceg = df_all[df_all['cegnev'] == cegnev].copy()
-            df_ceg = df_ceg.sort_values(by='et_ev').reset_index(drop=True)
-
-            
-            
-            
-            # 1. Belső ellenőrzések a DIFF oszlopokon
+            df_ceg = df_all[df_all['cegnev'] == cegnev].copy().sort_values(by='et_ev').reset_index(drop=True)
             diff_columns = [col for col in df_ceg.columns if col.endswith('_DIFF')]
             
-            detailed_diffs = {
-                'immaterialis_javak_DIFF', 'targyi_eszkozok_DIFF', 'befektetett_penzugyi_eszkozok_DIFF',
-                'keszletek_DIFF', 'kovetelesek_DIFF', 'ertekpapirok_DIFF', 'penzeszkozok_DIFF',
-                'aktiv_idobeli_elhatarolasok_DIFF', 'hatrasorolt_kotelezettsegek_DIFF',
-                'hosszu_lejaratu_kotelezettsegek_DIFF', 'rovid_lejaratu_kotelezettsegek_DIFF',
-                'passziv_idobeli_elhatarolasok_DIFF', 'ek_ertekesites_netto_arbevetele_DIFF',
-                'ek_aktivalt_sajat_teljesitmenyek_DIFF', 'ek_anyagjellegu_raforditasok_DIFF',
-                'ek_szemelyi_jellegu_raforditasok_DIFF'
-            }
+            # Beszámolótípusokhoz tartozó szabályok
+            main_diffs = {'eszkozok_forrasok_DIFF', 'eszkozok_DIFF', 'forrasok_DIFF'}
+            roman_diffs = {'befektetett_eszkozok_DIFF', 'forgoeszkozok_DIFF', 'sajat_toke_DIFF', 'kotelezettsegek_DIFF'}
             
             for index, row in df_ceg.iterrows():
                 ev = int(row['et_ev']) if pd.notna(row['et_ev']) else "Ismeretlen"
                 hibak = []
                 
-                # Dinamikus azonosítás: ha az alapvető részletező sorok hiányoznak, a beszámoló egyszerűsített
-                is_simplified = (
-                    row['ek_01_belfoldi_ertekesites_netto_arbevetele'] == 0 and
-                    row['ek_10_berkoltseg'] == 0 and
-                    row['a_ii_1_ingatlanok_es_a_kapcsolodo_vagyoni_erteku_jogok'] == 0
-                )
-                
+                # Egyszerűsített és Mikrogazdálkodói struktúrák intelligens azonosítása
+                is_simplified = (row['ek_10_berkoltseg'] == 0 and row['a_ii_1_ingatlanok_es_a_kapcsolodo_vagyoni_erteku_jogok'] == 0)
+                is_mikro = (is_simplified and row['a_ii_targyi_eszkozok'] == 0 and row['d_i_jegyzett_toke'] == 0)
+
                 for col in diff_columns:
-                    # Egyszerűsített beszámolónál átugorjuk a mélyebb bontások ellenőrzését
-                    if is_simplified and col in detailed_diffs:
-                        continue
+                    if is_mikro and col not in main_diffs:
+                        continue # A mikróban csak 7 sor van, a többit nem szabad összegezni
+                    if is_simplified and not is_mikro and col not in main_diffs and col not in roman_diffs:
+                        continue # Az egyszerűsítettben nincsenek arab számos részletezések
                         
-                    # 0.01-es tűréshatár a lebegőpontos kerekítési hibák miatt
                     if pd.notna(row[col]) and abs(row[col]) > 0.01:
                         hibak.append(f"{col}: Eltérés = {row[col]:.2f}")
                 
@@ -207,14 +180,14 @@ def main():
                 else:
                     print(f"✅ {ev}. év: Minden vizsgált főösszeg tökéletesen egyezik a részletekkel.")
 
-
-                    
-            # ====================================================
-            # 2. MUTATÓK (KPI-ok) KISZÁMÍTÁSA PANDAS SEGÍTSÉGÉVEL
-            # ====================================================
             print("📈 Pénzügyi mutatók (KPI) kiszámítása...")
             
-            df_ceg['MUTATO: Vagyon változása (%)'] = ((df_ceg['eszkozok_osszesen'] / df_ceg['eszkozok_osszesen'].shift(1)) - 1) * 100
+            # Vagyon változása (Ha nincs előző év, akkor NaN lesz, ami normális)
+            df_ceg['MUTATO: Vagyon változása (%)'] = np.where(
+                df_ceg['eszkozok_osszesen'].shift(1) > 0,
+                ((df_ceg['eszkozok_osszesen'] / df_ceg['eszkozok_osszesen'].shift(1)) - 1) * 100,
+                0
+            )
             
             elso_ev_vagyona = df_ceg['eszkozok_osszesen'].iloc[0]
             elso_ev = df_ceg['et_ev'].iloc[0]
@@ -224,32 +197,48 @@ def main():
                 if (row['et_ev'] - elso_ev) > 0 and elso_ev_vagyona > 0 else 0, axis=1
             )
             
-            df_ceg['MUTATO: Saját tőke aránya (%)'] = (df_ceg['d_sajat_toke'] / df_ceg['forrasok_osszesen']) * 100
-            df_ceg['MUTATO: Eladósodottság / Idegen tőke aránya (%)'] = ((df_ceg['f_kotelezettsegek'] + df_ceg['g_passziv_idobeli_elhatarolasok']) / df_ceg['forrasok_osszesen']) * 100
+            df_ceg['MUTATO: Saját tőke aránya (%)'] = np.where(
+                df_ceg['forrasok_osszesen'] > 0,
+                (df_ceg['d_sajat_toke'] / df_ceg['forrasok_osszesen']) * 100, 0
+            )
+            
+            df_ceg['MUTATO: Eladósodottság / Idegen tőke aránya (%)'] = np.where(
+                df_ceg['forrasok_osszesen'] > 0,
+                ((df_ceg['f_kotelezettsegek'] + df_ceg['g_passziv_idobeli_elhatarolasok']) / df_ceg['forrasok_osszesen']) * 100, 0
+            )
             
             df_ceg['MUTATO: Tőke + Idegen tőke ELLENŐRZÉS (%)'] = df_ceg['MUTATO: Saját tőke aránya (%)'] + df_ceg['MUTATO: Eladósodottság / Idegen tőke aránya (%)']
             
-            df_ceg['MUTATO: Tőkefeszültség (%)'] = ((df_ceg['f_kotelezettsegek'] + df_ceg['g_passziv_idobeli_elhatarolasok']) / df_ceg['d_sajat_toke']) * 100
+            df_ceg['MUTATO: Tőkefeszültség (%)'] = np.where(
+                df_ceg['d_sajat_toke'] != 0,
+                ((df_ceg['f_kotelezettsegek'] + df_ceg['g_passziv_idobeli_elhatarolasok']) / df_ceg['d_sajat_toke']) * 100, 0
+            )
             
-            df_ceg['MUTATO: Saját tőke szorzó (jegyzett tőkéhez) (%)'] = (df_ceg['d_sajat_toke'] / df_ceg['d_i_jegyzett_toke']) * 100
+            # Megvédi a kódot attól, ha egy Mikrogazdálkodói beszámolóban nincs 'Jegyzett tőke' (0-val osztás ellen)
+            df_ceg['MUTATO: Saját tőke szorzó (jegyzett tőkéhez) (%)'] = np.where(
+                df_ceg['d_i_jegyzett_toke'] > 0,
+                (df_ceg['d_sajat_toke'] / df_ceg['d_i_jegyzett_toke']) * 100, 0
+            )
+            
             df_ceg['MUTATO: Saját tőke változása (%)'] = df_ceg['MUTATO: Saját tőke szorzó (jegyzett tőkéhez) (%)'] - df_ceg['MUTATO: Saját tőke szorzó (jegyzett tőkéhez) (%)'].shift(1)
             
-            df_ceg['MUTATO: Fedezet I. mutató (%)'] = (df_ceg['d_sajat_toke'] / df_ceg['a_befektetett_eszkozok']) * 100
-            df_ceg['MUTATO: Fedezet II. mutató (%)'] = ((df_ceg['d_sajat_toke'] + df_ceg['f_ii_hosszu_lejaratu_kotelezettsegek']) / df_ceg['a_befektetett_eszkozok']) * 100
+            df_ceg['MUTATO: Fedezet I. mutató (%)'] = np.where(
+                df_ceg['a_befektetett_eszkozok'] > 0,
+                (df_ceg['d_sajat_toke'] / df_ceg['a_befektetett_eszkozok']) * 100, 0
+            )
+            
+            df_ceg['MUTATO: Fedezet II. mutató (%)'] = np.where(
+                df_ceg['a_befektetett_eszkozok'] > 0,
+                ((df_ceg['d_sajat_toke'] + df_ceg['f_ii_hosszu_lejaratu_kotelezettsegek']) / df_ceg['a_befektetett_eszkozok']) * 100, 0
+            )
 
-            # ====================================================
-            # 3. EXPORTÁLÁS EXCEL FÁJLBA
-            # ====================================================
+            # Exportálás
             safe_cegnev = make_safe_filename(cegnev)
             excel_filename = f"{safe_cegnev}_Beszamolo_Elemzes.xlsx"
             
-            # Töröljük a felesleges cégnevet, mert az Excel névben már benne van
             df_ceg = df_ceg.drop(columns=['cegnev'])
-            
-            # Évszámok formázása (.0 levágása)
             df_ceg['et_ev'] = df_ceg['et_ev'].fillna(0).astype(int)
             
-            # Transzponálás (évek kerülnek az oszlopokba, attribútumok a sorokba)
             df_transposed = df_ceg.set_index('et_ev').T
             df_transposed.index.name = 'Attribútum / Mutató'
             df_transposed.columns.name = 'Év'
