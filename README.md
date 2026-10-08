@@ -12,3 +12,10 @@ DB_CONFIG = {
     'password': 'XXXXXXXXXXXXXXX',  # Password here!!!
     'database': 'XXXXXXXXXXXXXXX'
 }
+
+.html files should be put:
+FinanceResearch\CorporateReports
+
+If all done correctly:
+cd to Python folder and:
+python import_reports.py
